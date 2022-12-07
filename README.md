@@ -1,0 +1,1 @@
+./flink run -m yarn-cluster -ynm DWD_DEVICE_FEIYAN_LOG_EVENT -p 3 -ys 3 -yjm 1024 -ytm 2000m -d -c com.iotmars.compass.DeviceLogApp -yqu default /opt/jar/DWD_DEVICE_FEIYAN_LOG_EVENT-1.0-SNAPSHOT.jar
