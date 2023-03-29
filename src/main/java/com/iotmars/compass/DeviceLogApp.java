@@ -58,7 +58,7 @@ public class DeviceLogApp {
                 "   `items` STRING,\n" +
 //                        "   `proctime` AS proctime(),\n" +
                 "   `ts_ltz` AS TO_TIMESTAMP_LTZ(gmtCreate, 3),\n" +
-                "   WATERMARK FOR ts_ltz AS ts_ltz - INTERVAL '30' SECOND\n" +
+                "   WATERMARK FOR ts_ltz AS ts_ltz - INTERVAL '30' SECOND\n" +  // 忍30秒的数据延迟(其中最开始时没有触发计算，那么延迟可以无限大。一旦输出结果，超过水位线的延迟数据被丢弃)
                 ") WITH (\n" +
                 "   'connector' = 'kafka',\n" +
                 "   'topic' = 'items-model',\n" +
