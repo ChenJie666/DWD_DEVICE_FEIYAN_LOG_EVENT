@@ -19,8 +19,18 @@ import java.util.Set;
 public class GetDiff extends TableFunction<Row> {
     public void eval(String newData, String oldData) {
 //        Logger.getLogger("CompareAndGetDiff").info("getDiff 开始解析: " + newData + "  " + oldData);
-
         if (Objects.isNull(oldData)) {
+            // 如果是ErrorCode，为了展示当前异常信息，而不是改变之后才展示，需要添加当前设备的状态
+            JSONObject newDataObj = JSON.parseObject(newData);
+            JSONObject errorCodeObject = newDataObj.getJSONObject("ErrorCode");
+            String errorCode = "";
+            if (Objects.isNull(errorCodeObject)) {
+                errorCode = "0";
+            } else {
+                errorCode = errorCodeObject.getString("value");
+            }
+
+            collect(Row.of("ErrorCode", "ErrorCode" + ":" + errorCode, "ErrorCode" + ":"));
             return;
         }
         try {
