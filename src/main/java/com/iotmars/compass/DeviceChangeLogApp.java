@@ -40,7 +40,7 @@ public class DeviceChangeLogApp {
 
     public static void main(String[] args) throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(1);
+//        env.setParallelism(3);
 //        env.disableOperatorChaining();
 
         // 设置checkpoint
@@ -60,7 +60,7 @@ public class DeviceChangeLogApp {
 //        env.setStateBackend(new EmbeddedRocksDBStateBackend());
 
 //        System.setProperty("HADOOP_USER_NAME", "root");
-//        env.getCheckpointConfig().setCheckpointStorage("hdfs://192.168.101.193:8020/flink/checkpoint/");
+//        env.getCheckpointConfig().setCheckpointStorage("hdfs://192.168.101.193:8020/flink/checkpoint/DWD_DEVICE_FEIYAN_LOG_EVENT");
 
         // 读取Kafka
         Properties properties = new Properties();
