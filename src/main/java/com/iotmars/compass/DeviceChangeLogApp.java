@@ -7,6 +7,8 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.contrib.streaming.state.EmbeddedRocksDBStateBackend;
@@ -93,7 +95,7 @@ public class DeviceChangeLogApp {
                                  String checkFailedData;
                                  String productKey;
                                  String deviceName;
-                                 JsonNode itemsJsonObject;
+                                 Iterator<Map.Entry<String, JsonNode>> fields;
                                  try {
                                      JsonNode logJsonNode = objectNode.get("value");
                                      deviceType = logJsonNode.get("deviceType").textValue();
@@ -102,14 +104,13 @@ public class DeviceChangeLogApp {
                                      checkFailedData = logJsonNode.get("checkFailedData").textValue();
                                      productKey = logJsonNode.get("productKey").textValue();
                                      deviceName = logJsonNode.get("deviceName").textValue();
-                                     itemsJsonObject = logJsonNode.get("items");
+                                     fields = logJsonNode.get("items").fields();
                                  } catch (Exception e) {
                                      logger.error("无items元素，非设备状态日志");
                                      return;
                                  }
 
-                                 Iterator<Map.Entry<String, JsonNode>> fields = itemsJsonObject.fields();
-
+//                                 Iterator<Map.Entry<String, JsonNode>> fields = itemsJsonObject.fields();
 
                                  // 用于存储联动属性
                                  HashMap<String, Long> linkEntries = new HashMap<>();
@@ -134,7 +135,7 @@ public class DeviceChangeLogApp {
                                          String eventOriValue = eventName + ":";
                                          ItemsModelEventDTO itemsModelEventDTO = new ItemsModelEventDTO(deviceType, iotId, requestId, checkFailedData, productKey, eventTimestamp, deviceName, eventName, eventValue, eventOriValue);
                                          out.collect(itemsModelEventDTO);
-                                         System.out.println("输出单独属性：" + itemsModelEventDTO);
+//                                         System.out.println("输出单独属性：" + itemsModelEventDTO);
                                      }
                                  }
 
@@ -144,7 +145,7 @@ public class DeviceChangeLogApp {
                                  linkEntries.forEach((eventName, event_timestamp) -> {
                                      ItemsModelEventDTO itemsModelEventDTO = new ItemsModelEventDTO(deviceType, iotId, requestId, checkFailedData, productKey, event_timestamp, deviceName, eventName, linkValuesString, linkOriValuesString);
                                      out.collect(itemsModelEventDTO);
-                                     System.out.println("输出联动属性：" + itemsModelEventDTO);
+//                                     System.out.println("输出联动属性：" + itemsModelEventDTO);
                                  });
 
                              }
@@ -165,11 +166,14 @@ public class DeviceChangeLogApp {
                 .keyBy(itemsModelEventDTO -> itemsModelEventDTO.getProductKey() + "_" + itemsModelEventDTO.getDeviceName() + "_" + itemsModelEventDTO.getEventName())
                 .process(new KeyedProcessFunction<String, ItemsModelEventDTO, ItemsModelEventDTO>() {
                              private ListState<ItemsModelEventDTO> listState;
+                             private ValueState<Boolean> isFirstFlagState;
 
                              @Override
                              public void open(Configuration parameters) throws Exception {
                                  super.open(parameters);
                                  listState = getRuntimeContext().getListState(new ListStateDescriptor<ItemsModelEventDTO>("compare-list", ItemsModelEventDTO.class));
+                                 isFirstFlagState = getRuntimeContext().getState(new ValueStateDescriptor<Boolean>("is-first-flag", Boolean.class));
+//                                 isFirstFlagState.update(true);
                              }
 
                              @Override
@@ -178,16 +182,17 @@ public class DeviceChangeLogApp {
 
                                  // 每来一条数据，插入到状态后端中；如果数据的事件时间超过延迟时间，则将数据输出到侧输出流
                                  long eventTime = itemsModelEventDTO.getGmtCreate();
-                                 logger.warn("验证" + itemsModelEventDTO.getEventName() + "数据到达processElement时，水位线是否已经被该数据更新:" + currentWatermark);
-                                 logger.warn(itemsModelEventDTO.getEventName() + "数据到达processElement时该数据的eventTime:" + eventTime);
+//                                 logger.warn("验证" + itemsModelEventDTO.getEventName() + "数据到达processElement时，水位线是否已经被该数据更新:" + currentWatermark);
+//                                 logger.warn(itemsModelEventDTO.getEventName() + "数据到达processElement时该数据的eventTime:" + eventTime);
 
-                                 // 如果不是第一条数据或事件时间小于水位线时间的
+                                 // 如果不是第一条数据且事件时间小于水位线时间的为迟到事件
                                  if (eventTime <= currentWatermark && currentWatermark != Long.MIN_VALUE) {
                                      ctx.output(lateOutputTag, "late: " + itemsModelEventDTO);
+                                 } else {
+                                     // 每来一条数据定义一个当前时间+1毫秒的定时器，用于排序和输出结果
+                                     listState.add(itemsModelEventDTO);
+                                     ctx.timerService().registerEventTimeTimer(eventTime + 1);
                                  }
-                                 // 每来一条数据定义一个当前时间+1毫秒的定时器，用于排序和输出结果
-                                 listState.add(itemsModelEventDTO);
-                                 ctx.timerService().registerEventTimeTimer(eventTime + 1);
 
 //                                 // 注意，如果状态中没有记录，那么这条记录直接输出作为初始状态。
 //                                 if (!listState.get().iterator().hasNext()) {
@@ -202,7 +207,7 @@ public class DeviceChangeLogApp {
 
                              @Override
                              public void onTimer(long timestamp, OnTimerContext ctx, Collector<ItemsModelEventDTO> out) throws Exception {
-                                 logger.warn("onTimer timestamp:" + timestamp);
+//                                 logger.warn("onTimer timestamp:" + timestamp);
 
                                  Iterable<ItemsModelEventDTO> itemsModelEventIterable = listState.get();
 
@@ -212,6 +217,7 @@ public class DeviceChangeLogApp {
                                  itemsModelEventIterable.forEach(itemsModelEvent -> {
                                              long gmtCreate = itemsModelEvent.getGmtCreate();
                                              if (gmtCreate < timestamp) {
+                                                 // 将水位线没过的记录排序。根据set的特性，如果排序字段(此处为事件时间)相同，只会保留其中一条。
                                                  outWatermarkItemsModelEventSet.add(itemsModelEvent);
 
                                              } else {
@@ -229,6 +235,11 @@ public class DeviceChangeLogApp {
                                      // 如果是第一条，则不对比；从第二条开始和前一条对比(对应下面存入一条，因为超过水位线为迟到数据，所以存入的一条肯定是最大的，即不会被对比导致重复输出)
                                      if (Objects.isNull(itemsModelEventDTOLag)) {
                                          itemsModelEventDTOLag = itemsModelEventDTO;
+                                         // 输出流中的第一条记录(事件时间最小)，即记录 从无到有 的变化
+                                         if (Objects.isNull(isFirstFlagState.value())) {
+                                             isFirstFlagState.update(false);
+                                             out.collect(itemsModelEventDTO);
+                                         }
                                      } else {
                                          // 当前数据
                                          String eventName = itemsModelEventDTO.getEventName();
@@ -239,17 +250,28 @@ public class DeviceChangeLogApp {
                                          for (String event : events) {
                                              String[] split = event.split(":");
                                              if (split[0].equals(eventName)) {
-                                                 eventValueCode = split[1];
+                                                 // 如果切分出来的value为空，直接使用split[1]会报错，这里判断一下
+                                                 if (split.length == 1) {
+                                                     eventValueCode = "";
+                                                 } else {
+                                                     eventValueCode = split[1];
+                                                 }
                                                  break;
                                              }
                                          }
 
                                          // 前一条数据
+                                         String eventOriValueCode = null;
                                          String eventValueLag = itemsModelEventDTOLag.getEventValue();
                                          String[] eventsLag = eventValueLag.split(",");
                                          for (String event : eventsLag) {
                                              String[] split = event.split(":");
-                                             if (split[0].equals(eventName) && !split[1].equals(eventValueCode)) {
+                                             if (split.length == 1) {
+                                                 eventOriValueCode = "";
+                                             } else {
+                                                 eventOriValueCode = split[1];
+                                             }
+                                             if (split[0].equals(eventName) && !eventOriValueCode.equals(eventValueCode)) {
                                                  // 如果相同事件的值不同，则将上一条的值放到本条数据的EventOriValue字段中
                                                  itemsModelEventDTO.setEventOriValue(eventValueLag);
                                                  out.collect(itemsModelEventDTO);
