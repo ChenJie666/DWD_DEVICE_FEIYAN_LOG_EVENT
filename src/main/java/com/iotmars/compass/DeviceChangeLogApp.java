@@ -1,10 +1,12 @@
 package com.iotmars.compass;
 
+import com.alibaba.fastjson.JSONObject;
 import com.iotmars.compass.entity.ItemsModelEventDTO;
 import com.iotmars.compass.util.JSONKeyValueDeserializationSchema;
 import org.apache.flink.api.common.eventtime.SerializableTimestampAssigner;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.state.ValueState;
@@ -12,7 +14,11 @@ import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.contrib.streaming.state.EmbeddedRocksDBStateBackend;
+import org.apache.flink.formats.json.JsonRowDataSerializationSchema;
+import org.apache.flink.formats.json.JsonRowSerializationSchema;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.jsonschema.JsonSerializableSchema;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.module.SimpleSerializers;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -25,11 +31,19 @@ import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumerBase;
+import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer;
+import org.apache.flink.streaming.connectors.kafka.KafkaSerializationSchema;
+import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
+import org.apache.flink.streaming.util.serialization.KeyedSerializationSchema;
+import org.apache.flink.types.Row;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 
@@ -59,30 +73,30 @@ public class DeviceChangeLogApp {
         ));
 
         // 设置StateBackend
-//        env.setStateBackend(new EmbeddedRocksDBStateBackend());
+        env.setStateBackend(new EmbeddedRocksDBStateBackend());
 
 //        System.setProperty("HADOOP_USER_NAME", "root");
 //        env.getCheckpointConfig().setCheckpointStorage("hdfs://192.168.101.193:8020/flink/checkpoint/DWD_DEVICE_FEIYAN_LOG_EVENT");
 
         // 读取Kafka
         Properties properties = new Properties();
-//        properties.setProperty("bootstrap.servers", "192.168.101.179:9092,192.168.101.180:9092,192.168.101.181:9092");
-        properties.setProperty("bootstrap.servers", "192.168.32.242:9092");
+        properties.setProperty("bootstrap.servers", "192.168.101.179:9092,192.168.101.180:9092,192.168.101.181:9092");
+//        properties.setProperty("bootstrap.servers", "192.168.32.242:9092");
         properties.setProperty("group.id", "flink-device_change_log_app_test2");
+        FlinkKafkaConsumerBase<ObjectNode> objectNodeFlinkKafkaConsumerBase = new FlinkKafkaConsumer<>("items-model", new JSONKeyValueDeserializationSchema(true), properties);
 
         // 水位线容许延迟时间
         int waterMarkSeconds = 30;
 
-        FlinkKafkaConsumerBase<ObjectNode> objectNodeFlinkKafkaConsumerBase = new FlinkKafkaConsumer<>("items-model", new JSONKeyValueDeserializationSchema(true), properties);
-
         // TODO 根据业务修改offset位置
 //        objectNodeFlinkKafkaConsumerBase.setStartFromEarliest();
-        objectNodeFlinkKafkaConsumerBase.setStartFromLatest();
+//        objectNodeFlinkKafkaConsumerBase.setStartFromLatest();
+        objectNodeFlinkKafkaConsumerBase.setStartFromTimestamp(1680318000000L); // 2023-04-01 11:00:00
 //        objectNodeFlinkKafkaConsumerBase.setStartFromGroupOffsets();
         DataStreamSource<ObjectNode> objectNodeDataStreamSource = env.addSource(objectNodeFlinkKafkaConsumerBase);
 
         // TODO 迟到数据到侧输出流
-        OutputTag<String> lateOutputTag = new OutputTag<String>("LateOutputTag") {
+        OutputTag<ItemsModelEventDTO> lateOutputTag = new OutputTag<ItemsModelEventDTO>("LateOutputTag") {
         };
 
         SingleOutputStreamOperator<ItemsModelEventDTO> itemsModelEventDataStream = objectNodeDataStreamSource
@@ -187,7 +201,7 @@ public class DeviceChangeLogApp {
 
                                  // 如果不是第一条数据且事件时间小于水位线时间的为迟到事件
                                  if (eventTime <= currentWatermark && currentWatermark != Long.MIN_VALUE) {
-                                     ctx.output(lateOutputTag, "late: " + itemsModelEventDTO);
+                                     ctx.output(lateOutputTag, itemsModelEventDTO);
                                  } else {
                                      // 每来一条数据定义一个当前时间+1毫秒的定时器，用于排序和输出结果
                                      listState.add(itemsModelEventDTO);
@@ -232,7 +246,7 @@ public class DeviceChangeLogApp {
                                  Iterator<ItemsModelEventDTO> outWatermarkItemsModelEventSetIter = outWatermarkItemsModelEventSet.iterator();
                                  while (outWatermarkItemsModelEventSetIter.hasNext()) {
                                      ItemsModelEventDTO itemsModelEventDTO = outWatermarkItemsModelEventSetIter.next();
-                                     // 如果是第一条，则不对比；从第二条开始和前一条对比(对应下面存入一条，因为超过水位线为迟到数据，所以存入的一条肯定是最大的，即不会被对比导致重复输出)
+                                     // 如果是第一条，则不对比；从第二条开始和前一条对比(对应下面代码中存入一条，因为超过水位线为迟到数据，所以存入的一条肯定是最大的，即不会去对比上一条导致重复输出)
                                      if (Objects.isNull(itemsModelEventDTOLag)) {
                                          itemsModelEventDTOLag = itemsModelEventDTO;
                                          // 输出流中的第一条记录(事件时间最小)，即记录 从无到有 的变化
@@ -282,7 +296,7 @@ public class DeviceChangeLogApp {
                                          itemsModelEventDTOLag = itemsModelEventDTO;
                                      }
 
-                                     // 最后一条还需要放入到状态后端中，作为新来的数据的比对象(对应前面忽略第一条)
+                                     // 最后一条还需要放入到状态后端中，作为新来的数据的比对象(对应前面代码中忽略第一条)
                                      if (!outWatermarkItemsModelEventSetIter.hasNext()) {
                                          inWatermarkItemsModelEventList.add(itemsModelEventDTO);
                                      }
@@ -295,8 +309,47 @@ public class DeviceChangeLogApp {
                          }
                 );
 
-        resultDataStream.print("main");
-        resultDataStream.getSideOutput(lateOutputTag).print("late");
+        // 存储主流数据
+        Properties kafkaSinkProperties = new Properties();
+//        properties.setProperty("bootstrap.servers", "192.168.101.193:9092,192.168.101.194:9092,192.168.101.195:9092");
+        kafkaSinkProperties.setProperty("bootstrap.servers", "192.168.32.242:9092,192.168.32.243:9092,192.168.32.244:9092");
+        // 客户端事务的超时时间，超过了broker端允许的最大值
+        /**
+         默认broker端： transaction.max.timeout.ms=15min
+         客户端的超时时间：不允许超过这个值，而它的默认： transaction.timeout.ms = 1h
+         两个解决方法：
+         ①在客户端：pros.put(“transaction.timeout.ms”, 15 * 60 * 1000);（小于15min）
+         ②在服务端：修改配置文件：transaction.max.timeout.ms设置超过1小时 **/
+        kafkaSinkProperties.put("transaction.timeout.ms", 15 * 60 * 1000);
+
+        KafkaSerializationSchema<ItemsModelEventDTO> myMainkafkaSchema = new KafkaSerializationSchema<ItemsModelEventDTO>() {
+            @Override
+            public ProducerRecord<byte[], byte[]> serialize(ItemsModelEventDTO element, @Nullable Long timestamp) {
+                return new ProducerRecord<>("dwd_device_feiyan_log_event", (element.getProductKey() + "-" + element.getDeviceName()).getBytes(), JSONObject.toJSONBytes(element));
+            }
+        };
+        FlinkKafkaProducer<ItemsModelEventDTO> myMainProducer = new FlinkKafkaProducer<ItemsModelEventDTO>(
+                "dwd_device_feiyan_log_event",
+                myMainkafkaSchema,
+                kafkaSinkProperties,
+                FlinkKafkaProducer.Semantic.EXACTLY_ONCE
+        );
+        resultDataStream.addSink(myMainProducer);
+
+        // 存储迟到数据
+        KafkaSerializationSchema<ItemsModelEventDTO> myLatekafkaSchema = new KafkaSerializationSchema<ItemsModelEventDTO>() {
+            @Override
+            public ProducerRecord<byte[], byte[]> serialize(ItemsModelEventDTO element, @Nullable Long timestamp) {
+                return new ProducerRecord<>("dwd_device_feiyan_log_late_event", (element.getProductKey() + "-" + element.getDeviceName()).getBytes(), JSONObject.toJSONBytes(element));
+            }
+        };
+        FlinkKafkaProducer<ItemsModelEventDTO> myLateProducer = new FlinkKafkaProducer<ItemsModelEventDTO>(
+                "dwd_device_feiyan_log_late_event",
+                myLatekafkaSchema,
+                kafkaSinkProperties,
+                FlinkKafkaProducer.Semantic.EXACTLY_ONCE
+        );
+        resultDataStream.getSideOutput(lateOutputTag).addSink(myLateProducer);
 
         env.execute();
     }
