@@ -11,6 +11,6 @@ public class Constants {
     public static String SINK_KAFKA_BOOTSTRAP_SERVERS = "192.168.101.193:9092,192.168.101.194:9092,192.168.101.195:9092";
 
 //    public static String CHECKPOINT_STORAGE = "hdfs://192.168.101.193:8020/flink/checkpoint/msas_prod/msas_device_exceptions";
-    public static String CHECKPOINT_STORAGE = "hdfs:///flink/checkpoint/DWD_DEVICE_FEIYAN_LOG_EVENT";
+    public static String CHECKPOINT_STORAGE = "hdfs:///flink/checkpoint/dwd_device_feiyan_log_event";
 //    public static int PARALLELISM = 1;
 }
