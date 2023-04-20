@@ -340,11 +340,11 @@ public class DeviceChangeLogApp {
         KafkaSerializationSchema<ItemsModelEventDTO> myLatekafkaSchema = new KafkaSerializationSchema<ItemsModelEventDTO>() {
             @Override
             public ProducerRecord<byte[], byte[]> serialize(ItemsModelEventDTO element, @Nullable Long timestamp) {
-                return new ProducerRecord<>("dwd_device_feiyan_log_late_event", (element.getProductKey() + "-" + element.getDeviceName()).getBytes(), JSONObject.toJSONBytes(element));
+                return new ProducerRecord<>(Constants.SINK_KAFKA_TOPIC, (element.getProductKey() + "-" + element.getDeviceName()).getBytes(), JSONObject.toJSONBytes(element));
             }
         };
         FlinkKafkaProducer<ItemsModelEventDTO> myLateProducer = new FlinkKafkaProducer<ItemsModelEventDTO>(
-                "dwd_device_feiyan_log_late_event",
+                Constants.SINK_KAFKA_LATE_TOPIC,
                 myLatekafkaSchema,
                 kafkaSinkProperties,
                 FlinkKafkaProducer.Semantic.EXACTLY_ONCE
