@@ -1,6 +1,7 @@
 package com.iotmars.compass;
 
 import com.alibaba.fastjson.JSONObject;
+import com.iotmars.compass.constant.Constants;
 import com.iotmars.compass.entity.ItemsModelEventDTO;
 import com.iotmars.compass.util.JSONKeyValueDeserializationSchema;
 import org.apache.flink.api.common.eventtime.SerializableTimestampAssigner;
@@ -76,23 +77,23 @@ public class DeviceChangeLogApp {
         env.setStateBackend(new EmbeddedRocksDBStateBackend());
 
         System.setProperty("HADOOP_USER_NAME", "root");
-        env.getCheckpointConfig().setCheckpointStorage("hdfs://192.168.101.193:8020/flink/checkpoint/DWD_DEVICE_FEIYAN_LOG_EVENT");
+        env.getCheckpointConfig().setCheckpointStorage(Constants.CHECKPOINT_STORAGE);
 
         // 读取Kafka
         Properties properties = new Properties();
-        properties.setProperty("bootstrap.servers", "192.168.101.179:9092,192.168.101.180:9092,192.168.101.181:9092");
+        properties.setProperty("bootstrap.servers", Constants.SOURCE_KAFKA_BOOTSTRAP_SERVERS);
 //        properties.setProperty("bootstrap.servers", "192.168.32.242:9092");
-        properties.setProperty("group.id", "flink-device_change_log_app_test3");
+        properties.setProperty("group.id", Constants.SOURCE_KAFKA_GROUP_ID);
         FlinkKafkaConsumerBase<ObjectNode> objectNodeFlinkKafkaConsumerBase = new FlinkKafkaConsumer<>("items-model", new JSONKeyValueDeserializationSchema(true), properties);
 
         // 水位线容许延迟时间
         int waterMarkSeconds = 30;
 
         // TODO 根据业务修改offset位置
-        objectNodeFlinkKafkaConsumerBase.setStartFromEarliest();
+//        objectNodeFlinkKafkaConsumerBase.setStartFromEarliest();
 //        objectNodeFlinkKafkaConsumerBase.setStartFromLatest();
 //        objectNodeFlinkKafkaConsumerBase.setStartFromTimestamp(1680278400000L); // 2023-04-01 11:00:00
-//        objectNodeFlinkKafkaConsumerBase.setStartFromGroupOffsets();
+        objectNodeFlinkKafkaConsumerBase.setStartFromGroupOffsets();
         DataStreamSource<ObjectNode> objectNodeDataStreamSource = env.addSource(objectNodeFlinkKafkaConsumerBase);
 
         // TODO 迟到数据到侧输出流
@@ -311,8 +312,7 @@ public class DeviceChangeLogApp {
 
         // 存储主流数据
         Properties kafkaSinkProperties = new Properties();
-//        properties.setProperty("bootstrap.servers", "192.168.101.193:9092,192.168.101.194:9092,192.168.101.195:9092");
-        kafkaSinkProperties.setProperty("bootstrap.servers", "192.168.101.193:9092,192.168.101.194:9092,192.168.101.195:9092");
+        kafkaSinkProperties.setProperty("bootstrap.servers", Constants.SINK_KAFKA_BOOTSTRAP_SERVERS);
         // 客户端事务的超时时间，超过了broker端允许的最大值
         /**
          默认broker端： transaction.max.timeout.ms=15min
