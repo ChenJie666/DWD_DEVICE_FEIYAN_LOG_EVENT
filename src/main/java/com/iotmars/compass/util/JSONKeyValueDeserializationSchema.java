@@ -23,7 +23,7 @@ public class JSONKeyValueDeserializationSchema implements KafkaDeserializationSc
     private static final long serialVersionUID = 1509391548173891955L;
 
     private final boolean includeMetadata;
-    private ObjectMapper mapper;
+    private volatile ObjectMapper mapper;
 
     public JSONKeyValueDeserializationSchema(boolean includeMetadata) {
         this.includeMetadata = includeMetadata;
@@ -32,24 +32,28 @@ public class JSONKeyValueDeserializationSchema implements KafkaDeserializationSc
     @Override
     public ObjectNode deserialize(ConsumerRecord<byte[], byte[]> record) throws Exception {
         if (mapper == null) {
-            mapper = new ObjectMapper();
-        }
-        ObjectNode node = mapper.createObjectNode();
-        if (record.key() != null) {
-            node.set("key", mapper.readValue(record.key(), JsonNode.class));
-        }
-        if (record.value() != null) {
-            try {
-                node.set("value", mapper.readValue(record.value(), JsonNode.class));
-            } catch (Exception e) {
-                logger.error("解析JSON发生错误: " + new String(record.value()));
+            synchronized (JSONKeyValueDeserializationSchema.class) {
+                if (mapper == null) {
+                    mapper = new ObjectMapper();
+                }
             }
         }
-        if (includeMetadata) {
-            node.putObject("metadata")
-                    .put("offset", record.offset())
-                    .put("topic", record.topic())
-                    .put("partition", record.partition());
+        ObjectNode node = mapper.createObjectNode();
+        try {
+            if (record.key() != null) {
+                node.set("key", mapper.readValue(record.key(), JsonNode.class));
+            }
+            if (record.value() != null) {
+                    node.set("value", mapper.readValue(record.value(), JsonNode.class));
+            }
+            if (includeMetadata) {
+                node.putObject("metadata")
+                        .put("offset", record.offset())
+                        .put("topic", record.topic())
+                        .put("partition", record.partition());
+            }
+        } catch (Exception e) {
+            logger.error("JSONKeyValueDeserializationSchema - deserialize: {}   原数据为: {}", e.getMessage(), new String(record.value()));
         }
         return node;
     }

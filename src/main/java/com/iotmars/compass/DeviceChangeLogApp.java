@@ -91,9 +91,9 @@ public class DeviceChangeLogApp {
 
         // TODO 根据业务修改offset位置
 //        objectNodeFlinkKafkaConsumerBase.setStartFromEarliest();
-//        objectNodeFlinkKafkaConsumerBase.setStartFromLatest();
+        objectNodeFlinkKafkaConsumerBase.setStartFromLatest();
 //        objectNodeFlinkKafkaConsumerBase.setStartFromTimestamp(1680278400000L); // 2023-04-01 11:00:00
-        objectNodeFlinkKafkaConsumerBase.setStartFromGroupOffsets();
+//        objectNodeFlinkKafkaConsumerBase.setStartFromGroupOffsets();
         DataStreamSource<ObjectNode> objectNodeDataStreamSource = env.addSource(objectNodeFlinkKafkaConsumerBase);
 
         // TODO 迟到数据到侧输出流
@@ -308,7 +308,7 @@ public class DeviceChangeLogApp {
                                  listState.update(inWatermarkItemsModelEventList);
                              }
                          }
-                );
+                ).setParallelism(9);
 
         // 存储主流数据
         Properties kafkaSinkProperties = new Properties();
@@ -334,7 +334,7 @@ public class DeviceChangeLogApp {
                 kafkaSinkProperties,
                 FlinkKafkaProducer.Semantic.EXACTLY_ONCE
         );
-        resultDataStream.addSink(myMainProducer);
+        resultDataStream.addSink(myMainProducer).setParallelism(3);
 
         // 存储迟到数据
         KafkaSerializationSchema<ItemsModelEventDTO> myLatekafkaSchema = new KafkaSerializationSchema<ItemsModelEventDTO>() {
