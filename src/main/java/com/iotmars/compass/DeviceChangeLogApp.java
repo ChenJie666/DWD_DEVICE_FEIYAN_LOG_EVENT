@@ -7,7 +7,6 @@ import com.iotmars.compass.util.JSONKeyValueDeserializationSchema;
 import org.apache.flink.api.common.eventtime.SerializableTimestampAssigner;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
-import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.state.ValueState;
@@ -15,16 +14,10 @@ import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.contrib.streaming.state.EmbeddedRocksDBStateBackend;
-import org.apache.flink.formats.json.JsonRowDataSerializationSchema;
-import org.apache.flink.formats.json.JsonRowSerializationSchema;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.jsonschema.JsonSerializableSchema;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.module.SimpleSerializers;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.flink.streaming.api.CheckpointingMode;
-import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
-import org.apache.flink.streaming.api.datastream.KeyedStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -34,9 +27,6 @@ import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumerBase;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer;
 import org.apache.flink.streaming.connectors.kafka.KafkaSerializationSchema;
-import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
-import org.apache.flink.streaming.util.serialization.KeyedSerializationSchema;
-import org.apache.flink.types.Row;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -44,7 +34,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 
@@ -113,6 +102,7 @@ public class DeviceChangeLogApp {
                                  Iterator<Map.Entry<String, JsonNode>> fields;
                                  try {
                                      JsonNode logJsonNode = objectNode.get("value");
+                                     // 如果日志中没有如下属性，就会报错丢弃数据
                                      deviceType = logJsonNode.get("deviceType").textValue();
                                      iotId = logJsonNode.get("iotId").textValue();
                                      requestId = logJsonNode.get("requestId").textValue();
@@ -162,7 +152,6 @@ public class DeviceChangeLogApp {
                                      out.collect(itemsModelEventDTO);
 //                                     System.out.println("输出联动属性：" + itemsModelEventDTO);
                                  });
-
                              }
                          }
                 );
@@ -227,27 +216,30 @@ public class DeviceChangeLogApp {
                                  Iterable<ItemsModelEventDTO> itemsModelEventIterable = listState.get();
 
                                  // 获取超过水位线的记录，进行排序
-                                 TreeSet<ItemsModelEventDTO> outWatermarkItemsModelEventSet = new TreeSet<>();
-                                 ArrayList<ItemsModelEventDTO> inWatermarkItemsModelEventList = new ArrayList<>();
+                                 TreeSet<ItemsModelEventDTO> downWatermarkItemsModelEventSet = new TreeSet<>();
+                                 ArrayList<ItemsModelEventDTO> upWatermarkItemsModelEventList = new ArrayList<>();
                                  itemsModelEventIterable.forEach(itemsModelEvent -> {
                                              long gmtCreate = itemsModelEvent.getGmtCreate();
                                              if (gmtCreate < timestamp) {
                                                  // 将水位线没过的记录排序。根据set的特性，如果排序字段(此处为事件时间)相同，只会保留其中一条。
-                                                 outWatermarkItemsModelEventSet.add(itemsModelEvent);
+                                                 downWatermarkItemsModelEventSet.add(itemsModelEvent);
 
                                              } else {
-                                                 // 记录水位线内的list，最后更新到状态中
-                                                 inWatermarkItemsModelEventList.add(itemsModelEvent);
+                                                 // 记录水位线上的list，最后更新到状态中
+                                                 upWatermarkItemsModelEventList.add(itemsModelEvent);
                                              }
                                          }
                                  );
 
+                                 // 更新到状态中（TODO 这里可能会小概率覆盖掉在上述逻辑执行期间新添加的数据，即上面的代码执行时liststate添加了新的数据；保险起见可以再定义一个liststate存储再执行期间添加的数据）
+                                 listState.update(upWatermarkItemsModelEventList);
+
                                  // 通过比对填充eventOriValue值并输出下游。最后将排序中最新一条记录和未超过水位线的记录重新放入状态中(保证状态中有数据)
                                  ItemsModelEventDTO itemsModelEventDTOLag = null;
-                                 Iterator<ItemsModelEventDTO> outWatermarkItemsModelEventSetIter = outWatermarkItemsModelEventSet.iterator();
+                                 Iterator<ItemsModelEventDTO> outWatermarkItemsModelEventSetIter = downWatermarkItemsModelEventSet.iterator();
                                  while (outWatermarkItemsModelEventSetIter.hasNext()) {
                                      ItemsModelEventDTO itemsModelEventDTO = outWatermarkItemsModelEventSetIter.next();
-                                     // 如果是第一条，则不对比；从第二条开始和前一条对比(对应下面代码中存入一条，因为超过水位线为迟到数据，所以存入的一条肯定是最大的，即不会去对比上一条导致重复输出)
+                                     // 如果是第一条，则不对比；从第二条开始和前一条对比(对应下面代码中存入一条，因为超过水位线为迟到数据，所以存入的一条肯定是时间戳最小的，即不会去对比上一条导致重复输出)
                                      if (Objects.isNull(itemsModelEventDTOLag)) {
                                          itemsModelEventDTOLag = itemsModelEventDTO;
                                          // 输出流中的第一条记录(事件时间最小)，即记录 从无到有 的变化
@@ -299,13 +291,10 @@ public class DeviceChangeLogApp {
 
                                      // 最后一条还需要放入到状态后端中，作为新来的数据的比对象(对应前面代码中忽略第一条)
                                      if (!outWatermarkItemsModelEventSetIter.hasNext()) {
-                                         inWatermarkItemsModelEventList.add(itemsModelEventDTO);
+                                         upWatermarkItemsModelEventList.add(itemsModelEventDTO);
                                      }
 
                                  }
-
-                                 // 更新到状态中
-                                 listState.update(inWatermarkItemsModelEventList);
                              }
                          }
                 ).setParallelism(9);
