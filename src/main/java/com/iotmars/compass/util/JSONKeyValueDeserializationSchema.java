@@ -54,6 +54,8 @@ public class JSONKeyValueDeserializationSchema implements KafkaDeserializationSc
             }
         } catch (Exception e) {
             logger.error("JSONKeyValueDeserializationSchema - deserialize: {}   原数据为: {}", e.getMessage(), new String(record.value()));
+            // 如果json解析错误，则可能是json格式有误，直接返回null，在后面过滤掉null值
+            return null;
         }
         return node;
     }

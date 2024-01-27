@@ -212,6 +212,8 @@ public class DeviceChangeLogApp {
                              @Override
                              public void onTimer(long timestamp, OnTimerContext ctx, Collector<ItemsModelEventDTO> out) throws Exception {
 //                                 logger.warn("onTimer timestamp:" + timestamp);
+                                 // 第一个参数是定时器时间，水位线时间要从ctx中获取
+                                 long timeWaterTs = ctx.timerService().currentWatermark();
 
                                  Iterable<ItemsModelEventDTO> itemsModelEventIterable = listState.get();
 
@@ -220,7 +222,7 @@ public class DeviceChangeLogApp {
                                  ArrayList<ItemsModelEventDTO> upWatermarkItemsModelEventList = new ArrayList<>();
                                  itemsModelEventIterable.forEach(itemsModelEvent -> {
                                              long gmtCreate = itemsModelEvent.getGmtCreate();
-                                             if (gmtCreate < timestamp) {
+                                             if (gmtCreate <= timeWaterTs) {
                                                  // 将水位线没过的记录排序。根据set的特性，如果排序字段(此处为事件时间)相同，只会保留其中一条。
                                                  downWatermarkItemsModelEventSet.add(itemsModelEvent);
 
