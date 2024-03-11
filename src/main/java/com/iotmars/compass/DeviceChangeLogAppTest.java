@@ -1,10 +1,12 @@
 package com.iotmars.compass;
 
 import com.alibaba.fastjson.JSONObject;
+import com.iotmars.compass.constant.Constants;
 import com.iotmars.compass.entity.ItemsModelEventDTO;
 import com.iotmars.compass.util.JSONKeyValueDeserializationSchema;
 import org.apache.flink.api.common.eventtime.SerializableTimestampAssigner;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.io.FileInputFormat;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
@@ -14,6 +16,7 @@ import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.contrib.streaming.state.EmbeddedRocksDBStateBackend;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
@@ -48,43 +51,32 @@ public class DeviceChangeLogAppTest {
 
     public static void main(String[] args) throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-//        env.setParallelism(3);
-//        env.disableOperatorChaining();
 
-        // 设置checkpoint
-        env.enableCheckpointing(5 * 60 * 1000, CheckpointingMode.EXACTLY_ONCE); // 开启checkpoint，并制定ck的一致性语义
-        env.getCheckpointConfig().setCheckpointTimeout(10 * 60 * 1000L); // 设置ck超时时间
-        env.getCheckpointConfig().setMaxConcurrentCheckpoints(1); // 设置两次重启的最小时间间隔
-        env.getCheckpointConfig().setMinPauseBetweenCheckpoints(3000L);
-        env.getCheckpointConfig().enableExternalizedCheckpoints(
-                CheckpointConfig.ExternalizedCheckpointCleanup.RETAIN_ON_CANCELLATION // 取消任务时保留外部检查点
-        );
-        env.getCheckpointConfig().enableUnalignedCheckpoints();
-        env.setRestartStrategy(RestartStrategies.failureRateRestart(
-                3, Time.days(1L), Time.minutes(1L)
-        ));
-
-        // 设置StateBackend
-//        env.setStateBackend(new EmbeddedRocksDBStateBackend());
-
-//        System.setProperty("HADOOP_USER_NAME", "root");
-//        env.getCheckpointConfig().setCheckpointStorage("hdfs://192.168.101.193:8020/flink/checkpoint/DWD_DEVICE_FEIYAN_LOG_EVENT");
-
-        // 读取Kafka
-        Properties properties = new Properties();
-        properties.setProperty("bootstrap.servers", "192.168.101.183:9092,192.168.101.184:9092,192.168.101.185:9092");
-        properties.setProperty("group.id", "flink-device_change_log_app_test4");
-        FlinkKafkaConsumerBase<ObjectNode> objectNodeFlinkKafkaConsumerBase = new FlinkKafkaConsumer<>("items-model", new JSONKeyValueDeserializationSchema(true), properties);
-
+        env.setParallelism(1);
         // 水位线容许延迟时间
-        int waterMarkSeconds = 10;
+        int waterMarkSeconds = 1;
 
-        // TODO 根据业务修改offset位置
-//        objectNodeFlinkKafkaConsumerBase.setStartFromEarliest();
-        objectNodeFlinkKafkaConsumerBase.setStartFromLatest();
-//        objectNodeFlinkKafkaConsumerBase.setStartFromTimestamp(1680278400000L); // 2023-04-01 11:00:00
-//        objectNodeFlinkKafkaConsumerBase.setStartFromGroupOffsets();
-        DataStreamSource<ObjectNode> objectNodeDataStreamSource = env.addSource(objectNodeFlinkKafkaConsumerBase);
+//        SingleOutputStreamOperator<ObjectNode> objectNodeDataStreamSource = env.readTextFile("origin.txt").process(new ProcessFunction<String, ObjectNode>() {
+        SingleOutputStreamOperator<ObjectNode> objectNodeDataStreamSource = env.socketTextStream("192.168.101.195",7777).process(new ProcessFunction<String, ObjectNode>() {
+            @Override
+            public void processElement(String value, ProcessFunction<String, ObjectNode>.Context ctx, Collector<ObjectNode> out) throws Exception {
+                ObjectMapper mapper = new ObjectMapper();
+                ObjectNode node = mapper.createObjectNode();
+                try {
+                    if (value != null) {
+                        node.set("value", mapper.readValue(value, JsonNode.class));
+                    }
+                } catch (Exception e) {
+                    logger.error("JSONKeyValueDeserializationSchema - deserialize: {}   原数据为: {}", e.getMessage(), new String(value));
+                    // 如果json解析错误，则可能是json格式有误，直接返回null，在后面过滤掉null值
+                    return;
+                }
+                out.collect(node);
+            }
+        });
+
+
+//        DataStreamSource<ObjectNode> objectNodeDataStreamSource = env.addSource(objectNodeFlinkKafkaConsumerBase);
 
         // TODO 迟到数据到侧输出流
         OutputTag<ItemsModelEventDTO> lateOutputTag = new OutputTag<ItemsModelEventDTO>("LateOutputTag") {
@@ -103,6 +95,7 @@ public class DeviceChangeLogAppTest {
                                  Iterator<Map.Entry<String, JsonNode>> fields;
                                  try {
                                      JsonNode logJsonNode = objectNode.get("value");
+                                     // 如果日志中没有如下属性，就会报错丢弃数据
                                      deviceType = logJsonNode.get("deviceType").textValue();
                                      iotId = logJsonNode.get("iotId").textValue();
                                      requestId = logJsonNode.get("requestId").textValue();
@@ -125,6 +118,9 @@ public class DeviceChangeLogAppTest {
                                  // 解析items中元素并每个元素创建一个对象
                                  while (fields.hasNext()) {
                                      Map.Entry<String, JsonNode> next = fields.next();
+//                                     if ("LStOvRealTemp".equals(next.getKey())) {
+//                                         System.out.println(next.getValue());
+//                                     }
                                      String eventName = next.getKey();
                                      JsonNode value = next.getValue();
                                      String eventValueCode = value.get("value").asText();
@@ -152,7 +148,6 @@ public class DeviceChangeLogAppTest {
                                      out.collect(itemsModelEventDTO);
 //                                     System.out.println("输出联动属性：" + itemsModelEventDTO);
                                  });
-
                              }
                          }
                 );
@@ -161,6 +156,7 @@ public class DeviceChangeLogAppTest {
                 WatermarkStrategy.<ItemsModelEventDTO>forBoundedOutOfOrderness(Duration.ofSeconds(waterMarkSeconds)).withTimestampAssigner(new SerializableTimestampAssigner<ItemsModelEventDTO>() {
                     @Override
                     public long extractTimestamp(ItemsModelEventDTO itemsModelEventDTO, long recordTimestamp) {
+//                        System.out.println("extractTimestamp: " + itemsModelEventDTO.getGmtCreate() + "  currentThread: " + Thread.currentThread().getName());
                         return itemsModelEventDTO.getGmtCreate();
                     }
                 }));
@@ -197,6 +193,7 @@ public class DeviceChangeLogAppTest {
                                      // 每来一条数据定义一个当前时间+1毫秒的定时器，用于排序和输出结果
                                      listState.add(itemsModelEventDTO);
                                      ctx.timerService().registerEventTimeTimer(eventTime + 1);
+//                                     System.out.println("注册定时器: " + (eventTime + 1) + "  当前水位线为: " + ctx.timerService().currentWatermark() + "  事件为:" + itemsModelEventDTO.getEventName());
                                  }
 
 //                                 // 注意，如果状态中没有记录，那么这条记录直接输出作为初始状态。
@@ -213,31 +210,34 @@ public class DeviceChangeLogAppTest {
                              @Override
                              public void onTimer(long timestamp, OnTimerContext ctx, Collector<ItemsModelEventDTO> out) throws Exception {
 //                                 logger.warn("onTimer timestamp:" + timestamp);
+//                                 System.out.println("onTimer timestamp:" + timestamp);
+                                 // 第一个参数是定时器时间，水位线时间要从ctx中获取
+                                 long timeWaterTs = ctx.timerService().currentWatermark();
 
                                  Iterable<ItemsModelEventDTO> itemsModelEventIterable = listState.get();
 
                                  // 获取超过水位线的记录，进行排序
-                                 TreeSet<ItemsModelEventDTO> outWatermarkItemsModelEventSet = new TreeSet<>();
-                                 ArrayList<ItemsModelEventDTO> inWatermarkItemsModelEventList = new ArrayList<>();
+                                 TreeSet<ItemsModelEventDTO> downWatermarkItemsModelEventSet = new TreeSet<>();
+                                 ArrayList<ItemsModelEventDTO> upWatermarkItemsModelEventList = new ArrayList<>();
                                  itemsModelEventIterable.forEach(itemsModelEvent -> {
                                              long gmtCreate = itemsModelEvent.getGmtCreate();
-                                             if (gmtCreate < timestamp) {
+                                             if (gmtCreate <= timeWaterTs) {
                                                  // 将水位线没过的记录排序。根据set的特性，如果排序字段(此处为事件时间)相同，只会保留其中一条。
-                                                 outWatermarkItemsModelEventSet.add(itemsModelEvent);
-
+                                                 downWatermarkItemsModelEventSet.add(itemsModelEvent);
                                              } else {
-                                                 // 记录水位线内的list，最后更新到状态中
-                                                 inWatermarkItemsModelEventList.add(itemsModelEvent);
+                                                 // 记录水位线上的list，最后更新到状态中
+                                                 upWatermarkItemsModelEventList.add(itemsModelEvent);
                                              }
                                          }
                                  );
 
+
                                  // 通过比对填充eventOriValue值并输出下游。最后将排序中最新一条记录和未超过水位线的记录重新放入状态中(保证状态中有数据)
                                  ItemsModelEventDTO itemsModelEventDTOLag = null;
-                                 Iterator<ItemsModelEventDTO> outWatermarkItemsModelEventSetIter = outWatermarkItemsModelEventSet.iterator();
+                                 Iterator<ItemsModelEventDTO> outWatermarkItemsModelEventSetIter = downWatermarkItemsModelEventSet.iterator();
                                  while (outWatermarkItemsModelEventSetIter.hasNext()) {
                                      ItemsModelEventDTO itemsModelEventDTO = outWatermarkItemsModelEventSetIter.next();
-                                     // 如果是第一条，则不对比；从第二条开始和前一条对比(对应下面代码中存入一条，因为超过水位线为迟到数据，所以存入的一条肯定是最大的，即不会去对比上一条导致重复输出)
+                                     // 如果是第一条，则不对比；从第二条开始和前一条对比(对应下面代码中存入一条，因为超过水位线为迟到数据，所以存入的一条肯定是时间戳最小的，即不会去对比上一条导致重复输出)
                                      if (Objects.isNull(itemsModelEventDTOLag)) {
                                          itemsModelEventDTOLag = itemsModelEventDTO;
                                          // 输出流中的第一条记录(事件时间最小)，即记录 从无到有 的变化
@@ -289,23 +289,19 @@ public class DeviceChangeLogAppTest {
 
                                      // 最后一条还需要放入到状态后端中，作为新来的数据的比对象(对应前面代码中忽略第一条)
                                      if (!outWatermarkItemsModelEventSetIter.hasNext()) {
-                                         inWatermarkItemsModelEventList.add(itemsModelEventDTO);
+                                         upWatermarkItemsModelEventList.add(itemsModelEventDTO);
                                      }
-
                                  }
 
-                                 // 更新到状态中
-                                 listState.update(inWatermarkItemsModelEventList);
+                                 // 更新到状态中（TODO 这里可能会小概率覆盖掉在上述逻辑执行期间新添加的数据，即上面的代码执行时liststate添加了新的数据；保险起见可以再定义一个liststate存储再执行期间添加的数据）
+                                 listState.update(upWatermarkItemsModelEventList);
                              }
                          }
-                );
+                ).setParallelism(2);
 
-        resultDataStream.print("main:");
-        resultDataStream.getSideOutput(lateOutputTag).print("late:");
-
-        // 存储主流数据
+//        // 存储主流数据
 //        Properties kafkaSinkProperties = new Properties();
-//        kafkaSinkProperties.setProperty("bootstrap.servers", "192.168.101.193:9092,192.168.101.194:9092,192.168.101.195:9092");
+//        kafkaSinkProperties.setProperty("bootstrap.servers", Constants.SINK_KAFKA_BOOTSTRAP_SERVERS);
 //        // 客户端事务的超时时间，超过了broker端允许的最大值
 //        /**
 //         默认broker端： transaction.max.timeout.ms=15min
@@ -318,31 +314,34 @@ public class DeviceChangeLogAppTest {
 //        KafkaSerializationSchema<ItemsModelEventDTO> myMainkafkaSchema = new KafkaSerializationSchema<ItemsModelEventDTO>() {
 //            @Override
 //            public ProducerRecord<byte[], byte[]> serialize(ItemsModelEventDTO element, @Nullable Long timestamp) {
-//                return new ProducerRecord<>("dwd_device_feiyan_log_event", (element.getProductKey() + "-" + element.getDeviceName()).getBytes(), JSONObject.toJSONBytes(element));
+//                return new ProducerRecord<>("dwd_device_feiyan_log_event_test", (element.getProductKey() + "-" + element.getDeviceName()).getBytes(), JSONObject.toJSONBytes(element));
 //            }
 //        };
 //        FlinkKafkaProducer<ItemsModelEventDTO> myMainProducer = new FlinkKafkaProducer<ItemsModelEventDTO>(
-//                "dwd_device_feiyan_log_event",
+//                "dwd_device_feiyan_log_event_test",
 //                myMainkafkaSchema,
 //                kafkaSinkProperties,
 //                FlinkKafkaProducer.Semantic.EXACTLY_ONCE
 //        );
-//        resultDataStream.addSink(myMainProducer);
+//        resultDataStream.addSink(myMainProducer).setParallelism(3);
 //
 //        // 存储迟到数据
 //        KafkaSerializationSchema<ItemsModelEventDTO> myLatekafkaSchema = new KafkaSerializationSchema<ItemsModelEventDTO>() {
 //            @Override
 //            public ProducerRecord<byte[], byte[]> serialize(ItemsModelEventDTO element, @Nullable Long timestamp) {
-//                return new ProducerRecord<>("dwd_device_feiyan_log_late_event", (element.getProductKey() + "-" + element.getDeviceName()).getBytes(), JSONObject.toJSONBytes(element));
+//                return new ProducerRecord<>(Constants.SINK_KAFKA_TOPIC, (element.getProductKey() + "-" + element.getDeviceName()).getBytes(), JSONObject.toJSONBytes(element));
 //            }
 //        };
 //        FlinkKafkaProducer<ItemsModelEventDTO> myLateProducer = new FlinkKafkaProducer<ItemsModelEventDTO>(
-//                "dwd_device_feiyan_log_late_event",
+//                Constants.SINK_KAFKA_LATE_TOPIC,
 //                myLatekafkaSchema,
 //                kafkaSinkProperties,
 //                FlinkKafkaProducer.Semantic.EXACTLY_ONCE
 //        );
 //        resultDataStream.getSideOutput(lateOutputTag).addSink(myLateProducer);
+
+        resultDataStream.print();
+        resultDataStream.getSideOutput(lateOutputTag).print();
 
         env.execute();
     }

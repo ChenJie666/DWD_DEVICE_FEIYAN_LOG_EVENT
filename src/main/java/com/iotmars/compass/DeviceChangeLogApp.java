@@ -233,9 +233,6 @@ public class DeviceChangeLogApp {
                                          }
                                  );
 
-                                 // 更新到状态中（TODO 这里可能会小概率覆盖掉在上述逻辑执行期间新添加的数据，即上面的代码执行时liststate添加了新的数据；保险起见可以再定义一个liststate存储再执行期间添加的数据）
-                                 listState.update(upWatermarkItemsModelEventList);
-
                                  // 通过比对填充eventOriValue值并输出下游。最后将排序中最新一条记录和未超过水位线的记录重新放入状态中(保证状态中有数据)
                                  ItemsModelEventDTO itemsModelEventDTOLag = null;
                                  Iterator<ItemsModelEventDTO> outWatermarkItemsModelEventSetIter = downWatermarkItemsModelEventSet.iterator();
@@ -297,6 +294,8 @@ public class DeviceChangeLogApp {
                                      }
 
                                  }
+                                 // 更新到状态中（TODO 这里可能会小概率覆盖掉在上述逻辑执行期间新添加的数据，即上面的代码执行时liststate添加了新的数据；保险起见可以再定义一个liststate存储再执行期间添加的数据）
+                                 listState.update(upWatermarkItemsModelEventList);
                              }
                          }
                 ).setParallelism(9);
