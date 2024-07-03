@@ -287,13 +287,9 @@ public class DeviceChangeLogApp {
                                          // 将当前数据赋值给Lag数据
                                          itemsModelEventDTOLag = itemsModelEventDTO;
                                      }
-
-                                     // 最后一条还需要放入到状态后端中，作为新来的数据的比对象(对应前面代码中忽略第一条)
-                                     if (!outWatermarkItemsModelEventSetIter.hasNext()) {
-                                         upWatermarkItemsModelEventList.add(itemsModelEventDTO);
-                                     }
-
                                  }
+                                 // 最后一条还需要放入到状态后端中，作为新来的数据的比对象(对应前面代码中忽略第一条)
+                                 upWatermarkItemsModelEventList.add(downWatermarkItemsModelEventSet.last());
                                  // 更新到状态中（TODO 这里可能会小概率覆盖掉在上述逻辑执行期间新添加的数据，即上面的代码执行时liststate添加了新的数据；保险起见可以再定义一个liststate存储再执行期间添加的数据）
                                  listState.update(upWatermarkItemsModelEventList);
                              }
