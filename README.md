@@ -10,3 +10,13 @@
  -yD metrics.reporter.promgateway.deleteOnShutdown=false \
  -yD metrics.reporter.promgateway.groupingKey="instance=DWD_DEVICE_FEIYAN_LOG_EVENT_prod" \
  /opt/jar/prod/DWD_DEVICE_FEIYAN_LOG_EVENT-1.0-SNAPSHOT.jar`
+
+使用pull模式拉取prometheus数据
+```
+./flink run \
+ -m yarn-cluster -ynm DWD_DEVICE_FEIYAN_LOG_EVENT_prod -p 3 -ys 6 -yjm 1024 -ytm 6144m \
+ -d -c com.iotmars.compass.DeviceChangeLogApp -yqu default \
+  -yD metrics.reporter.prom.class=org.apache.flink.metrics.prometheus.PrometheusReporter \
+  -yD metrics.reporter.prom.port=9253 \
+ /opt/jar/prod/DWD_DEVICE_FEIYAN_LOG_EVENT-1.0-SNAPSHOT.jar
+ ```
