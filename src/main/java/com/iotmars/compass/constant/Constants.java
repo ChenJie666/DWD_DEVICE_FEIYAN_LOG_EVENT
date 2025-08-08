@@ -7,8 +7,8 @@ package com.iotmars.compass.constant;
 public class Constants {
 
     public static String SOURCE_KAFKA_GROUP_ID = "flink-device_change_log_app_test3"; // 后序需要更换group_id
-    public static String SOURCE_KAFKA_BOOTSTRAP_SERVERS = "192.168.101.179:9092,192.168.101.180:9092,192.168.101.181:9092";
-    public static String SINK_KAFKA_BOOTSTRAP_SERVERS = "192.168.101.193:9092,192.168.101.194:9092,192.168.101.195:9092";
+    public static String SOURCE_KAFKA_BOOTSTRAP_SERVERS = "192.168.32.39:9092,192.168.32.40:9092,192.168.32.41:9092";
+    public static String SINK_KAFKA_BOOTSTRAP_SERVERS = "192.168.32.53:9092,192.168.32.54:9092,192.168.32.55:9092";
     public static String SINK_KAFKA_TOPIC = "dwd_device_feiyan_log_late_event";
     public static String SINK_KAFKA_LATE_TOPIC = "dwd_device_feiyan_log_late_event";
 

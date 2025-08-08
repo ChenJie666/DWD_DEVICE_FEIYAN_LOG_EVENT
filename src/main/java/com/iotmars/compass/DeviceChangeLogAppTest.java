@@ -57,7 +57,7 @@ public class DeviceChangeLogAppTest {
         int waterMarkSeconds = 1;
 
 //        SingleOutputStreamOperator<ObjectNode> objectNodeDataStreamSource = env.readTextFile("origin.txt").process(new ProcessFunction<String, ObjectNode>() {
-        SingleOutputStreamOperator<ObjectNode> objectNodeDataStreamSource = env.socketTextStream("192.168.101.195",7777).process(new ProcessFunction<String, ObjectNode>() {
+        SingleOutputStreamOperator<ObjectNode> objectNodeDataStreamSource = env.socketTextStream("192.168.32.55",7777).process(new ProcessFunction<String, ObjectNode>() {
             @Override
             public void processElement(String value, ProcessFunction<String, ObjectNode>.Context ctx, Collector<ObjectNode> out) throws Exception {
                 ObjectMapper mapper = new ObjectMapper();

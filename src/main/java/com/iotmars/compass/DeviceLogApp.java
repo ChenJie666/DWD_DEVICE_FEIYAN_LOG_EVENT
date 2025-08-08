@@ -37,7 +37,7 @@ public class DeviceLogApp {
         env.setStateBackend(new EmbeddedRocksDBStateBackend());
 
         System.setProperty("HADOOP_USER_NAME", "root");
-        env.getCheckpointConfig().setCheckpointStorage("hdfs://192.168.101.193:8020/flink/checkpoint/DWD_DEVICE_FEIYAN_LOG_EVENT");
+        env.getCheckpointConfig().setCheckpointStorage("hdfs://192.168.32.53:8020/flink/checkpoint/DWD_DEVICE_FEIYAN_LOG_EVENT");
 
         StreamTableEnvironment tableEnv = StreamTableEnvironment.create(env);
         TableConfig config = tableEnv.getConfig();
@@ -62,7 +62,7 @@ public class DeviceLogApp {
                 ") WITH (\n" +
                 "   'connector' = 'kafka',\n" +
                 "   'topic' = 'items-model',\n" +
-                "   'properties.bootstrap.servers' = '192.168.101.179:9092,192.168.101.180:9092,192.168.101.181:9092',\n" +
+                "   'properties.bootstrap.servers' = '192.168.32.39:9092,192.168.32.40:9092,192.168.32.41:9092',\n" +
                 "   'properties.group.id' = 'flink-compass-device',\n" +
 //                "            'scan.startup.mode' = 'earliest-offset',\n" +
 //                "            'scan.startup.mode' = 'latest-offset',\n" +
@@ -116,7 +116,7 @@ public class DeviceLogApp {
                 ") WITH (" +
                 "  'connector' = 'kafka',\n" +
                 "  'topic' = 'dwd_device_feiyan_log_event',\n" +
-                "  'properties.bootstrap.servers' = '192.168.101.193:9092,192.168.101.194:9092,192.168.101.195:9092',\n" +
+                "  'properties.bootstrap.servers' = '192.168.32.53:9092,192.168.32.54:9092,192.168.32.55:9092',\n" +
                 "  'format' = 'json'\n" +
                 ")");
 

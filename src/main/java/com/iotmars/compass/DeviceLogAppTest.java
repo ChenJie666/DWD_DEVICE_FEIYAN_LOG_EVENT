@@ -29,7 +29,7 @@ public class DeviceLogAppTest {
                 ") WITH (\n" +
                 "   'connector' = 'kafka',\n" +
                 "   'topic' = 'items-model',\n" +
-                "   'properties.bootstrap.servers' = '192.168.101.184:9092,192.168.101.185:9092,192.168.101.186:9092',\n" +
+                "   'properties.bootstrap.servers' = '192.168.32.44:9092,192.168.32.45:9092,192.168.32.46:9092',\n" +
                 "   'properties.group.id' = 'flink-compass-device',\n" +
 //                "            'scan.startup.mode' = 'earliest-offset',\n" +
                 "            'scan.startup.mode' = 'latest-offset',\n" +
